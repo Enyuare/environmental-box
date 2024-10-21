@@ -12,7 +12,13 @@ import math
 from digitalio import DigitalInOut
 from adafruit_mcp2515.canio import Message, RemoteTransmissionRequest
 from adafruit_mcp2515 import MCP2515 as CAN
-
+from adafruit_bno08x.i2c import BNO08X_I2C
+from adafruit_bno08x import (
+    BNO_REPORT_ACCELEROMETER,
+    BNO_REPORT_GYROSCOPE,
+    BNO_REPORT_MAGNETOMETER,
+    BNO_REPORT_ROTATION_VECTOR,
+)
 
 TempSID = 0
 PressureSID = 0
@@ -271,7 +277,12 @@ aht2 = adafruit_ahtx0.AHTx0(tca[2])  # TCA Channel 2
 
 
 i2c = board.I2C()
-sensor = adafruit_lsm9ds1.LSM9DS1_I2C(i2c)
+bno = BNO08X_I2C(i2c)
+bno.enable_feature(BNO_REPORT_ACCELEROMETER)
+bno.enable_feature(BNO_REPORT_GYROSCOPE)
+bno.enable_feature(BNO_REPORT_MAGNETOMETER)
+bno.enable_feature(BNO_REPORT_ROTATION_VECTOR)
+
 
 # CAN Configuration
 cs = DigitalInOut(board.CAN_CS)
@@ -302,13 +313,13 @@ while True:
     for i in range (10):
         for j in range(40):
             # Read acceleration, magnetometer, gyroscope, temperature.
-            accel_x, accel_y, accel_z = sensor.acceleration
-            mag_x, mag_y, mag_z = sensor.magnetic
-            gyro_x, gyro_y, gyro_z = sensor.gyro
+            accel_x, accel_y, accel_z = bno.acceleration
+            mag_x, mag_y, mag_z = bno.magnetic
+            gyro_x, gyro_y, gyro_z = bno.gyro
             # Print values.
-            #print("Acceleration (m/s^2): ({0:0.3f},{1:0.3f},{2:0.3f})".format(accel_x, accel_y, accel_z))
-            #print("Magnetometer (gauss): ({0:0.3f},{1:0.3f},{2:0.3f})".format(mag_x, mag_y,mag_z))
-            #print("Gyroscope (rad/sec): ({0:0.3f},{1:0.3f},{2:0.3f})".format(gyro_x, gyro_y, gyro_z))
+            print("Acceleration (m/s^2): ({0:0.3f},{1:0.3f},{2:0.3f})".format(accel_x, accel_y, accel_z))
+            print("Magnetometer (gauss): ({0:0.3f},{1:0.3f},{2:0.3f})".format(mag_x, mag_y,mag_z))
+            print("Gyroscope (rad/sec): ({0:0.3f},{1:0.3f},{2:0.3f})".format(gyro_x, gyro_y, gyro_z))
 
         #send accceleration, magnetometer, gyroscope data
 
