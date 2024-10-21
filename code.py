@@ -226,6 +226,26 @@ def claim_address(can_bus, source_address, name):
             else:
                 time.sleep(0.01)
     return not conflict
+def quaternion_to_euler(w, x, y, z):
+    # Convert quaternion to Euler angles (yaw, pitch, roll)
+    # Roll (x-axis rotation)
+    sinr_cosp = 2 * (w * x + y * z)
+    cosr_cosp = 1 - 2 * (x * x + y * y)
+    roll = math.atan2(sinr_cosp, cosr_cosp)
+
+    # Pitch (y-axis rotation)
+    sinp = 2 * (w * y - z * x)
+    if abs(sinp) >= 1:
+        pitch = math.copysign(math.pi / 2, sinp)  # Use 90 degrees if out of range
+    else:
+        pitch = math.asin(sinp)
+
+    # Yaw (z-axis rotation)
+    siny_cosp = 2 * (w * z + x * y)
+    cosy_cosp = 1 - 2 * (y * y + z * z)
+    yaw = math.atan2(siny_cosp, cosy_cosp)
+
+    return yaw, pitch, roll
 
 for channel in range(8):
     print(f"Scanning PCA9548 channel {channel}")
@@ -313,13 +333,26 @@ while True:
     for i in range (10):
         for j in range(40):
             # Read acceleration, magnetometer, gyroscope, temperature.
-            accel_x, accel_y, accel_z = bno.acceleration
-            mag_x, mag_y, mag_z = bno.magnetic
-            gyro_x, gyro_y, gyro_z = bno.gyro
+            #accel_x, accel_y, accel_z = bno.acceleration
+            #mag_x, mag_y, mag_z = bno.magnetic
+            #gyro_x, gyro_y, gyro_z = bno.gyro
             # Print values.
-            print("Acceleration (m/s^2): ({0:0.3f},{1:0.3f},{2:0.3f})".format(accel_x, accel_y, accel_z))
-            print("Magnetometer (gauss): ({0:0.3f},{1:0.3f},{2:0.3f})".format(mag_x, mag_y,mag_z))
-            print("Gyroscope (rad/sec): ({0:0.3f},{1:0.3f},{2:0.3f})".format(gyro_x, gyro_y, gyro_z))
+            #print("Acceleration (m/s^2): ({0:0.3f},{1:0.3f},{2:0.3f})".format(accel_x, accel_y, accel_z))
+            #print("Magnetometer (gauss): ({0:0.3f},{1:0.3f},{2:0.3f})".format(mag_x, mag_y,mag_z))
+            #print("Gyroscope (rad/sec): ({0:0.3f},{1:0.3f},{2:0.3f})".format(gyro_x, gyro_y, gyro_z))
+            quat = bno.quaternion  # Get quaternion data
+            if quat is not None:
+                w, x, y, z = quat
+                yaw, pitch, roll = quaternion_to_euler(w, x, y, z)
+
+                # Convert from radians to degrees
+                roll_deg = math.degrees(yaw) # from testing these were switched 
+                pitch_deg = math.degrees(pitch)
+                yaw_deg = math.degrees(roll)
+
+                print("Yaw: {:.2f}°, Pitch: {:.2f}°, Roll: {:.2f}°".format(yaw_deg, pitch_deg, roll_deg))
+            else:
+                print("Waiting for quaternion data...")
 
         #send accceleration, magnetometer, gyroscope data
 
