@@ -24,6 +24,7 @@ TempSID = 0
 PressureSID = 0
 HumiditySID = 0
 BatterySID = 0
+AttitudeSID = 0
 
 
 analog_pin = analogio.AnalogIn(board.A0)
@@ -69,6 +70,7 @@ def send_temperature(can_bus, temperature_celsius, temp_instance, temp_source, S
     message = Message(id=CAN_ID, data=datatemp, extended=True)
     send_success = can_bus.send(message)
     #print(f"Sent Temperature: {temperature_celsius:.2f}°C, Instance: {temp_instance}, Source: {temp_source}, Success: {send_success}")
+    #print(f"Sent CAN ID: {hex(CAN_ID)}, Data: {datatemp.hex()}")
 
     TempSID = TempSID + 1
     if TempSID == 252:
@@ -96,8 +98,12 @@ def send_pressure(can_bus, pressure_pascals, pressure_instance, pressure_source,
     # Create and send the CAN message
     message_pressure = Message(id=CAN_ID, data=data_pressure, extended=True)
     send_success = can_bus.send(message_pressure)
-    #print(f"Sent Pressure: {pressure_pascals:.2f} Pa, Instance: {pressure_instance}, Source: {pressure_source}, Success: {send_success}")
+    print(f"Sent Pressure: {pressure_pascals:.2f} Pa, Instance: {pressure_instance}, Source: {pressure_source}, Success: {send_success}")
 
+    PressureSID = PressureSID + 1
+    if PressureSID == 252:
+        PressureSID = 0
+        
 def send_humidity(can_bus, humidity_percentage, humidity_instance, humidity_source, Source_Address, Priority=6, PGN=130314):
     global HumiditySID
     # Scale the humidity value: value = humidity / 0.004
@@ -133,6 +139,10 @@ def send_humidity(can_bus, humidity_percentage, humidity_instance, humidity_sour
     message_humidity = Message(id=CAN_ID, data=data_humidity, extended=True)
     send_success = can_bus.send(message_humidity)
     #print(f"Sent Humidity: {humidity_percentage:.2f}%, Instance: {humidity_instance}, Source: {humidity_source}, Success: {send_success}")
+    print(f"Sent CAN ID: {hex(CAN_ID)}, Data: {datatemp.hex()}")
+    HumiditySID = HumiditySID + 1
+    if HumiditySID == 252:
+        HumiditySID = 0
 
 def send_battery_status(can_bus, current_A, battery_instance, Source_Address, Priority=6, PGN=127508):
     global BatterySID
@@ -169,6 +179,52 @@ def send_battery_status(can_bus, current_A, battery_instance, Source_Address, Pr
     if BatterySID >= 253:
         BatterySID = 0
 
+
+def send_attitude(can_bus, yaw_radians, pitch_radians, roll_radians, Source_Address, Priority=2, PGN=127257):
+    global AttitudeSID
+
+    # Scale the angles (radians to scaled integer)
+    yaw_scaled = int(yaw_radians * 10000)
+    pitch_scaled = int(pitch_radians * 10000)
+    roll_scaled = int(roll_radians * 10000)
+
+    # Convert scaled values to bytes (little-endian, signed)
+    yaw_bytes = yaw_scaled.to_bytes(2, 'little', signed=True)
+    pitch_bytes = pitch_scaled.to_bytes(2, 'little', signed=True)
+    roll_bytes = roll_scaled.to_bytes(2, 'little', signed=True)
+
+    # Reserved byte
+    reserved_byte = 0xFF
+
+    # Construct the data payload
+    data = bytes([
+        AttitudeSID,
+        yaw_bytes[0],
+        yaw_bytes[1],
+        pitch_bytes[0],
+        pitch_bytes[1],
+        roll_bytes[0],
+        roll_bytes[1],
+        reserved_byte
+    ])
+
+    # Construct the CAN ID
+    CAN_ID = (Priority << 26) | (PGN << 8) | Source_Address
+
+    # Create and send the CAN message
+    message = Message(id=CAN_ID, data=data, extended=True)
+    send_success = can_bus.send(message)
+
+    # Uncomment below to print the sent data for debugging
+    #print(f"Sent Attitude: Yaw={yaw_radians:.4f} rad, Pitch={pitch_radians:.4f} rad, Roll={roll_radians:.4f} rad")
+    #print(f"CAN ID: {hex(CAN_ID)}, Data: {data.hex()}, Send Success: {send_success}")
+
+    # Increment the Sequence ID (SID)
+    AttitudeSID += 1
+    if AttitudeSID >= 252:
+        AttitudeSID = 0
+    
+    
 def construct_name(unique_number, manufacturer_code, device_instance_lower,
                    device_instance_upper, device_function, device_class,
                    system_instance, industry_group, arbitrary_address_capable):
@@ -323,13 +379,26 @@ while True:
     #print("Pressure: {:6.1f}".format(bmp1.pressure))
     #print("Temperature: {:5.2f}".format(bmp1.temperature))
     # Look at your local weather report for a pressure at sea level reading
-    bmp1.sea_level_pressure = 1013.25
+    #bmp1.sea_level_pressure = 1013.25
     #print('Altitude: {} meters'.format(bmp1.altitude))
 
-    # to use aht data
-    # aht2.temperature, aht.relative_humidity
-    #print("\nTemperature: %0.1f C" % aht2.temperature)
-    #print("Humidity: %0.1f %%" % aht2.relative_humidity)
+    # set up name for address claim
+    unique_number = 0x1FFFFF       # Unique device number (21 bits)
+    manufacturer_code = 0x1FF      # Manufacturer code (11 bits)
+    device_instance_lower = 0x0    # Device instance lower (3 bits)
+    device_instance_upper = 0x0    # Device instance upper (5 bits)
+    device_function = 0x01         # Device function (8 bits)
+    device_class = 0x1F            # Device class (7 bits)
+    system_instance = 0x0          # System instance (4 bits)
+    industry_group = 0x4           # Industry group (3 bits)
+    arbitrary_address_capable = 0x1  # Arbitrary address capable (1 bit)
+
+    name = construct_name(
+        unique_number, manufacturer_code, device_instance_lower,
+        device_instance_upper, device_function, device_class,
+        system_instance, industry_group, arbitrary_address_capable
+    )
+    
     for i in range (10):
         for j in range(40):
             # Read acceleration, magnetometer, gyroscope, temperature.
@@ -351,34 +420,23 @@ while True:
                 yaw_deg = math.degrees(roll)
 
                 print("Yaw: {:.2f}°, Pitch: {:.2f}°, Roll: {:.2f}°".format(yaw_deg, pitch_deg, roll_deg))
+                # get source address
+                source_address = 0  # Starting address
+                while source_address <= 253:
+                    success = claim_address(can_bus, source_address, name)
+                    if success:
+                        print(f"Successfully claimed Source Address {source_address}")
+                        break
+                    else:
+                        source_address += 1
+
+                if source_address > 253:
+                    print("Failed to claim any address on the network.")
+                    # Handle failure (e.g., reset or halt operation)
+                
+                send_attitude(can_bus, yaw, pitch, roll, source_address)
             else:
                 print("Waiting for quaternion data...")
-
-        #send accceleration, magnetometer, gyroscope data
-
-    voltage = get_voltage(analog_pin)
-    #print(voltage)
-    voltage1 = get_voltage(analog_pin1)
-    #print(voltage1)
-    voltage2 = get_voltage(analog_pin2)
-    #print(voltage2)
-
-    # set up name for address claim
-    unique_number = 0x1FFFFF       # Unique device number (21 bits)
-    manufacturer_code = 0x1FF      # Manufacturer code (11 bits)
-    device_instance_lower = 0x0    # Device instance lower (3 bits)
-    device_instance_upper = 0x0    # Device instance upper (5 bits)
-    device_function = 0x01         # Device function (8 bits)
-    device_class = 0x1F            # Device class (7 bits)
-    system_instance = 0x0          # System instance (4 bits)
-    industry_group = 0x4           # Industry group (3 bits)
-    arbitrary_address_capable = 0x1  # Arbitrary address capable (1 bit)
-
-    name = construct_name(
-        unique_number, manufacturer_code, device_instance_lower,
-        device_instance_upper, device_function, device_class,
-        system_instance, industry_group, arbitrary_address_capable
-    )
 
     # get source address
     source_address = 0  # Starting address
@@ -393,7 +451,6 @@ while True:
     if source_address > 253:
         print("Failed to claim any address on the network.")
         # Handle failure (e.g., reset or halt operation)
-
 
     # sending temperature bmp 1
     temperature_celsius = bmp1.temperature  # temperature value in degrees celsius
@@ -407,7 +464,6 @@ while True:
         device_instance_upper, device_function, device_class,
         system_instance, industry_group, arbitrary_address_capable
     )
-
     # get source address
     source_address = 0  # Starting address
     while source_address <= 253:
@@ -421,7 +477,6 @@ while True:
     if source_address > 253:
         print("Failed to claim any address on the network.")
         # Handle failure (e.g., reset or halt operation)
-
 
     # sending pressure bmp 1
     pressure_pascals = bmp1.pressure * 100  # pressure value in Pa (converted from hPa)
@@ -524,11 +579,6 @@ while True:
     send_battery_status(can_bus, current_A2, battery_instance, source_address)
 
 
-    with can_bus.listen(timeout=1.0) as listener:
-
-        message = Message(id=0x1234ABCD, data=b"adafruit", extended=True)
-        send_success = can_bus.send(message)
-        print("Send success:", send_success)
 
 
 
