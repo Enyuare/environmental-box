@@ -103,7 +103,7 @@ def send_pressure(can_bus, pressure_pascals, pressure_instance, pressure_source,
     PressureSID = PressureSID + 1
     if PressureSID == 252:
         PressureSID = 0
-        
+
 def send_humidity(can_bus, humidity_percentage, humidity_instance, humidity_source, Source_Address, Priority=6, PGN=130314):
     global HumiditySID
     # Scale the humidity value: value = humidity / 0.004
@@ -115,7 +115,7 @@ def send_humidity(can_bus, humidity_percentage, humidity_instance, humidity_sour
     Actual_Humidity_bytes = Actual_Humidity.to_bytes(2, 'little', signed=False)
 
     # Set Humidity (not used)
-    Set_Humidity_bytes = b'\xFF\xFF'  # Data Not Available
+    Set_Humidity_bytes = b'\xFF\x7F'  # Data Not Available
 
     # Reserved byte
     Reserved_byte = 0xFF
@@ -223,8 +223,8 @@ def send_attitude(can_bus, yaw_radians, pitch_radians, roll_radians, Source_Addr
     AttitudeSID += 1
     if AttitudeSID >= 252:
         AttitudeSID = 0
-    
-    
+
+
 def construct_name(unique_number, manufacturer_code, device_instance_lower,
                    device_instance_upper, device_function, device_class,
                    system_instance, industry_group, arbitrary_address_capable):
@@ -234,10 +234,11 @@ def construct_name(unique_number, manufacturer_code, device_instance_lower,
     name |= (device_instance_lower & 0x7) << 32
     name |= (device_instance_upper & 0x1F) << 35
     name |= (device_function & 0xFF) << 40
-    name |= (device_class & 0x7F) << 48
-    name |= (system_instance & 0xF) << 55
+    name |= (0 & 0x1) << 48  # NMEA Reserved bit set to 0
+    name |= (device_class & 0x7F) << 49
+    name |= (system_instance & 0xF) << 56
     name |= (industry_group & 0x7) << 59
-    name |= (arbitrary_address_capable & 0x1) << 62
+    name |= (arbitrary_address_capable & 0x1) << 63
     return name
 
 def claim_address(can_bus, source_address, name):
@@ -351,7 +352,7 @@ aht2 = adafruit_ahtx0.AHTx0(tca[2])  # TCA Channel 2
 #aht7 = adafruit_ahtx0.AHTx0(tca[7])  # TCA Channel 7
 
 
-
+#print('here1')
 i2c = board.I2C()
 bno = BNO08X_I2C(i2c)
 bno.enable_feature(BNO_REPORT_ACCELEROMETER)
@@ -374,6 +375,7 @@ can_bus = CAN(
 #)  # use loopback to test with another device
 
 while True:
+    
     # to use bmp data
     # bmp1.pressure, bpm1.temperature, bmp1.altitude
     #print("Pressure: {:6.1f}".format(bmp1.pressure))
@@ -398,6 +400,7 @@ while True:
         device_instance_upper, device_function, device_class,
         system_instance, industry_group, arbitrary_address_capable
     )
+
     
     for i in range (10):
         for j in range(40):
@@ -415,17 +418,17 @@ while True:
                 yaw, pitch, roll = quaternion_to_euler(w, x, y, z)
 
                 # Convert from radians to degrees
-                roll_deg = math.degrees(yaw) # from testing these were switched 
+                roll_deg = math.degrees(yaw) # from testing these were switched
                 pitch_deg = math.degrees(pitch)
                 yaw_deg = math.degrees(roll)
 
-                print("Yaw: {:.2f}°, Pitch: {:.2f}°, Roll: {:.2f}°".format(yaw_deg, pitch_deg, roll_deg))
+                #print("Yaw: {:.2f}°, Pitch: {:.2f}°, Roll: {:.2f}°".format(yaw_deg, pitch_deg, roll_deg))
                 # get source address
                 source_address = 0  # Starting address
                 while source_address <= 253:
                     success = claim_address(can_bus, source_address, name)
                     if success:
-                        print(f"Successfully claimed Source Address {source_address}")
+                        #print(f"Successfully claimed Source Address {source_address}")
                         break
                     else:
                         source_address += 1
@@ -433,7 +436,6 @@ while True:
                 if source_address > 253:
                     print("Failed to claim any address on the network.")
                     # Handle failure (e.g., reset or halt operation)
-                
                 send_attitude(can_bus, yaw, pitch, roll, source_address)
             else:
                 print("Waiting for quaternion data...")
@@ -443,7 +445,7 @@ while True:
     while source_address <= 253:
         success = claim_address(can_bus, source_address, name)
         if success:
-            print(f"Successfully claimed Source Address {source_address}")
+            #print(f"Successfully claimed Source Address {source_address}")
             break
         else:
             source_address += 1
@@ -459,17 +461,13 @@ while True:
     send_temperature(can_bus, temperature_celsius, temp_instance, temp_source, source_address)
 
 
-    name = construct_name(
-        unique_number, manufacturer_code, device_instance_lower,
-        device_instance_upper, device_function, device_class,
-        system_instance, industry_group, arbitrary_address_capable
-    )
+
     # get source address
     source_address = 0  # Starting address
     while source_address <= 253:
         success = claim_address(can_bus, source_address, name)
         if success:
-            print(f"Successfully claimed Source Address {source_address}")
+            #print(f"Successfully claimed Source Address {source_address}")
             break
         else:
             source_address += 1
@@ -485,11 +483,6 @@ while True:
     send_pressure(can_bus, pressure_pascals, pressure_instance, pressure_source, source_address)
 
 
-    name = construct_name(
-        unique_number, manufacturer_code, device_instance_lower,
-        device_instance_upper, device_function, device_class,
-        system_instance, industry_group, arbitrary_address_capable
-    )
 
     # get source address
     source_address = 0  # Starting address
@@ -510,13 +503,9 @@ while True:
     humidity_instance = 0x01  # bmp1 source = 1
     humidity_source = 0x00    # inside humidity
     send_humidity(can_bus, humidity_percentage, humidity_instance, humidity_source, source_address)
+    # Print the humidity data for debugging
+    print(f"Humidity: {humidity_percentage:.2f}%, Instance: {humidity_instance}, Source: {humidity_source}")
 
-
-    name = construct_name(
-        unique_number, manufacturer_code, device_instance_lower,
-        device_instance_upper, device_function, device_class,
-        system_instance, industry_group, arbitrary_address_capable
-    )
 
     # get source address
     source_address = 0  # Starting address
@@ -557,6 +546,9 @@ while True:
     current_A1 = (voltage1 / 3.3) * 100  # Map 0-3.3V to 0-100A
     battery_instance = 0x02
     send_battery_status(can_bus, current_A1, battery_instance, source_address)
+    # Debugging print statements to view values
+    print(f"Voltage1: {voltage1:.4f} V")  # Print voltage with 4 decimal places
+    print(f"Current A1: {current_A1:.4f} A")  # Print current with 4 decimal places
 
     # get source address
     source_address = 0  # Starting address
