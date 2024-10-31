@@ -141,7 +141,7 @@ def send_humidity(can_bus, humidity_percentage, humidity_instance, humidity_sour
     message_humidity = Message(id=CAN_ID, data=data_humidity, extended=True)
     send_success = can_bus.send(message_humidity)
     #print(f"Sent Humidity: {humidity_percentage:.2f}%, Instance: {humidity_instance}, Source: {humidity_source}, Success: {send_success}")
-    print(f"Sent CAN ID: {hex(CAN_ID)}, Data: {datatemp.hex()}")
+    print(f"Sent CAN ID: {hex(CAN_ID)}, Data: {data_humidity.hex()}")
     HumiditySID = HumiditySID + 1
     if HumiditySID == 252:
         HumiditySID = 0
@@ -373,7 +373,7 @@ spi = board.SPI()
 #)  # use loopback to test without another device
 
 can_bus = CAN(
-    spi, cs, loopback=False, silent=False
+    spi, cs, loopback=True, silent=True
 )  # use loopback to test with another device
 
 while True:
@@ -404,7 +404,7 @@ while True:
     )
 
     
-    for i in range (10):
+    for i in range (1):
         for j in range(40):
             # Read acceleration, magnetometer, gyroscope, temperature.
             #accel_x, accel_y, accel_z = bno.acceleration
@@ -424,7 +424,7 @@ while True:
                 pitch_deg = math.degrees(pitch)
                 yaw_deg = math.degrees(roll)
 
-                #print("Yaw: {:.2f}°, Pitch: {:.2f}°, Roll: {:.2f}°".format(yaw_deg, pitch_deg, roll_deg))
+                print("Yaw: {:.2f}°, Pitch: {:.2f}°, Roll: {:.2f}°".format(yaw_deg, pitch_deg, roll_deg))
                 # get source address
                 source_address = 0  # Starting address
                 while source_address <= 253:
@@ -506,7 +506,7 @@ while True:
     humidity_source = 0x00    # inside humidity
     send_humidity(can_bus, humidity_percentage, humidity_instance, humidity_source, source_address)
     # Print the humidity data for debugging
-    #print(f"Humidity: {humidity_percentage:.2f}%, Instance: {humidity_instance}, Source: {humidity_source}")
+    print(f"Humidity: {humidity_percentage:.2f}%, Instance: {humidity_instance}, Source: {humidity_source}")
 
 
     # get source address
