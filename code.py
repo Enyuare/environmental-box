@@ -427,34 +427,62 @@ while True:
     #bmp1.sea_level_pressure = 1013.25 // this is for altitude readings 
     #print('Altitude: {} meters'.format(bmp1.altitude))
 
-  
+    # Initialize max tracking variables
+    max_current, max_current1, max_current2 = 0, 0, 0
     
-    for i in range (1):
-        for j in range(15):
-            # Read acceleration, magnetometer, gyroscope, temperature.
-            #accel_x, accel_y, accel_z = bno.acceleration
-            #mag_x, mag_y, mag_z = bno.magnetic
-            #gyro_x, gyro_y, gyro_z = bno.gyro
-            # Print values.
-            #print("Acceleration (m/s^2): ({0:0.3f},{1:0.3f},{2:0.3f})".format(accel_x, accel_y, accel_z))
-            #print("Magnetometer (gauss): ({0:0.3f},{1:0.3f},{2:0.3f})".format(mag_x, mag_y,mag_z))
-            #print("Gyroscope (rad/sec): ({0:0.3f},{1:0.3f},{2:0.3f})".format(gyro_x, gyro_y, gyro_z))
+    max_yaw, max_pitch, max_roll = 0, 0, 0
+    
+    for i in range(1):
+        for j in range(50):
+            # Attitude readings
             quat = bno.quaternion  # Get quaternion data
             if quat is not None:
                 w, x, y, z = quat
                 yaw, pitch, roll = quaternion_to_euler(w, x, y, z)
 
-                # Convert from radians to degrees
-                roll_deg = math.degrees(yaw) # from testing these were switched
-                pitch_deg = math.degrees(pitch)
-                yaw_deg = math.degrees(roll)
+                # Track max values
+                max_yaw = max(max_yaw, abs(yaw))
+                max_pitch = max(max_pitch, abs(pitch))
+                max_roll = max(max_roll, abs(roll))
 
-                #print("Yaw: {:.2f}°, Pitch: {:.2f}°, Roll: {:.2f}°".format(yaw_deg, pitch_deg, roll_deg))
-                # get source address
-                send_attitude(can_bus, yaw, pitch, roll, source_address)
-                attitude_count += 1
-            else:
-                print("Waiting for quaternion data...")
+            # Current readings
+            voltage = read_voltage(analog_pin)
+            sensor_voltage = voltage * 1.5
+            current = (sensor_voltage / 5.0) * 100.0
+            max_current = max(max_current, current)
+            
+            # Current readings
+            voltage1 = read_voltage(analog_pin1)
+            sensor_voltage1 = voltage1 * 1.5
+            current1 = (sensor_voltage1 / 5.0) * 100.0
+            max_current1 = max(max_current1, current1)
+
+            # Current readings
+            voltage2 = read_voltage(analog_pin2)
+            sensor_voltage2 = voltage2 * 1.5
+            current2 = (sensor_voltage2 / 5.0) * 100.0
+            max_current2 = max(max_current2, current2)
+
+
+        # Send max attitude
+        send_attitude(can_bus, max_yaw, max_pitch, max_roll, source_address)
+        attitude_count += 1 
+        
+        # Send max current
+        battery_instance = 0x01
+        send_battery_status(can_bus, max_current, battery_instance, source_address)
+        current_count += 1
+        # Send max current
+        battery_instance = 0x02
+        send_battery_status(can_bus, max_current1, battery_instance, source_address)
+        # Send max current
+        battery_instance = 0x03
+        send_battery_status(can_bus, max_current2, battery_instance, source_address)
+
+        # Reset max tracking variables for next iteration
+        max_current, max_current1, max_current2 = 0, 0, 0
+        max_yaw, max_pitch, max_roll = 0, 0, 0
+
 
 
     # sending temperature bmp 1
@@ -480,40 +508,6 @@ while True:
     #print(f"Humidity: {humidity_percentage:.2f}%, Instance: {humidity_instance}, Source: {humidity_source}")
     humidity_count += 1
 
-
-
-    # sending current data
-    voltage = read_voltage(analog_pin)
-    # Calculate the original sensor voltage before the voltage divider
-    sensor_voltage = voltage * 1.5  # Account for voltage divider (R1 + R2) / R2
-    # Calculate the current
-    current = (sensor_voltage / 5.0) * 100.0  # Based on sensor's 0-5V to 0-100A mapping
-    battery_instance = 0x01
-    send_battery_status(can_bus, current, battery_instance, source_address)
-    current_count += 1
-   
-    voltage1 = read_voltage(analog_pin1)
-    # Calculate the original sensor voltage before the voltage divider
-    sensor_voltage1 = voltage1 * 1.5  # Account for voltage divider (R1 + R2) / R2
-    # Calculate the current
-    current1 = (sensor_voltage1 / 5.0) * 100.0  # Based on sensor's 0-5V to 0-100A mapping
-    battery_instance = 0x02
-    send_battery_status(can_bus, current1, battery_instance, source_address)
-    # Debugging print statements to view values
-    #print(f"Voltage1: {voltage1:.4f} V")  # Print voltage with 4 decimal places
-    #print(f"Current A1: {current_A1:.4f} A")  # Print current with 4 decimal places
-
-
-    voltage2 = read_voltage(analog_pin2)
-    # Calculate the original sensor voltage before the voltage divider
-    sensor_voltage2 = voltage2 * 1.5  # Account for voltage divider (R1 + R2) / R2
-    # Calculate the current
-    current2 = (sensor_voltage2 / 5.0) * 100.0  # Based on sensor's 0-5V to 0-100A mapping
-    battery_instance = 0x02
-    send_battery_status(can_bus, current2, battery_instance, source_address)
-    # Debugging print statements to view values
-    #print(f"Voltage2: {voltage2:.4f} V")  # Print voltage with 4 decimal places
-    #print(f"Current A2: {current_A2:.4f} A")  # Print current with 4 decimal places
 
      # Check if it's time to calculate and print frequencies
     current_time = time.monotonic()
