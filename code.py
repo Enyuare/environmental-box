@@ -100,7 +100,7 @@ def send_pressure(can_bus, pressure_pascals, pressure_instance, pressure_source,
     # Create and send the CAN message
     message_pressure = Message(id=CAN_ID, data=data_pressure, extended=True)
     send_success = can_bus.send(message_pressure)
-    print(f"Sent Pressure: {pressure_pascals:.2f} Pa, Instance: {pressure_instance}, Source: {pressure_source}, Success: {send_success}")
+    #print(f"Sent Pressure: {pressure_pascals:.2f} Pa, Instance: {pressure_instance}, Source: {pressure_source}, Success: {send_success}")
 
     PressureSID = PressureSID + 1
     if PressureSID == 252:
@@ -141,7 +141,7 @@ def send_humidity(can_bus, humidity_percentage, humidity_instance, humidity_sour
     message_humidity = Message(id=CAN_ID, data=data_humidity, extended=True)
     send_success = can_bus.send(message_humidity)
     #print(f"Sent Humidity: {humidity_percentage:.2f}%, Instance: {humidity_instance}, Source: {humidity_source}, Success: {send_success}")
-    print(f"Sent CAN ID: {hex(CAN_ID)}, Data: {data_humidity.hex()}")
+    #print(f"Sent CAN ID: {hex(CAN_ID)}, Data: {data_humidity.hex()}")
     HumiditySID = HumiditySID + 1
     if HumiditySID == 252:
         HumiditySID = 0
@@ -376,36 +376,61 @@ can_bus = CAN(
     spi, cs, loopback=True, silent=True
 )  # use loopback to test with another device
 
-while True:
+# set up name for address claim
+unique_number = 0x1FFFFF       # Unique device number (21 bits)
+manufacturer_code = 0x1FF      # Manufacturer code (11 bits)
+device_instance_lower = 0x0    # Device instance lower (3 bits)
+device_instance_upper = 0x0    # Device instance upper (5 bits)
+device_function = 0x01         # Device function (8 bits)
+device_class = 0x1F            # Device class (7 bits)
+system_instance = 0x0          # System instance (4 bits)
+industry_group = 0x4           # Industry group (3 bits)
+arbitrary_address_capable = 0x1  # Arbitrary address capable (1 bit)
+
+name = construct_name(
+    unique_number, manufacturer_code, device_instance_lower,
+    device_instance_upper, device_function, device_class,
+    system_instance, industry_group, arbitrary_address_capable
+)
+# get source address
+source_address = 0  # Starting address
+while source_address <= 253:
+    success = claim_address(can_bus, source_address, name)
+    if success:
+        #print(f"Successfully claimed Source Address {source_address}")
+        break
+    else:
+        source_address += 1
+
+if source_address > 253:
+    print("Failed to claim any address on the network.")
+    # Handle failure (e.g., reset or halt operation)
+
     
+
+# Initialize counters and timing variables
+attitude_count = 0
+temperature_count = 0
+pressure_count = 0
+humidity_count = 0
+current_count = 0
+start_time = time.monotonic()
+interval = 5  # Interval in seconds to calculate and print frequencies
+
+
+while True:
     # to use bmp data
     # bmp1.pressure, bpm1.temperature, bmp1.altitude
     #print("Pressure: {:6.1f}".format(bmp1.pressure))
     #print("Temperature: {:5.2f}".format(bmp1.temperature))
     # Look at your local weather report for a pressure at sea level reading
-    #bmp1.sea_level_pressure = 1013.25
+    #bmp1.sea_level_pressure = 1013.25 // this is for altitude readings 
     #print('Altitude: {} meters'.format(bmp1.altitude))
 
-    # set up name for address claim
-    unique_number = 0x1FFFFF       # Unique device number (21 bits)
-    manufacturer_code = 0x1FF      # Manufacturer code (11 bits)
-    device_instance_lower = 0x0    # Device instance lower (3 bits)
-    device_instance_upper = 0x0    # Device instance upper (5 bits)
-    device_function = 0x01         # Device function (8 bits)
-    device_class = 0x1F            # Device class (7 bits)
-    system_instance = 0x0          # System instance (4 bits)
-    industry_group = 0x4           # Industry group (3 bits)
-    arbitrary_address_capable = 0x1  # Arbitrary address capable (1 bit)
-
-    name = construct_name(
-        unique_number, manufacturer_code, device_instance_lower,
-        device_instance_upper, device_function, device_class,
-        system_instance, industry_group, arbitrary_address_capable
-    )
-
+  
     
     for i in range (1):
-        for j in range(40):
+        for j in range(15):
             # Read acceleration, magnetometer, gyroscope, temperature.
             #accel_x, accel_y, accel_z = bno.acceleration
             #mag_x, mag_y, mag_z = bno.magnetic
@@ -424,81 +449,27 @@ while True:
                 pitch_deg = math.degrees(pitch)
                 yaw_deg = math.degrees(roll)
 
-                print("Yaw: {:.2f}°, Pitch: {:.2f}°, Roll: {:.2f}°".format(yaw_deg, pitch_deg, roll_deg))
+                #print("Yaw: {:.2f}°, Pitch: {:.2f}°, Roll: {:.2f}°".format(yaw_deg, pitch_deg, roll_deg))
                 # get source address
-                source_address = 0  # Starting address
-                while source_address <= 253:
-                    success = claim_address(can_bus, source_address, name)
-                    if success:
-                        #print(f"Successfully claimed Source Address {source_address}")
-                        break
-                    else:
-                        source_address += 1
-
-                if source_address > 253:
-                    print("Failed to claim any address on the network.")
-                    # Handle failure (e.g., reset or halt operation)
                 send_attitude(can_bus, yaw, pitch, roll, source_address)
+                attitude_count += 1
             else:
                 print("Waiting for quaternion data...")
 
-    # get source address
-    source_address = 0  # Starting address
-    while source_address <= 253:
-        success = claim_address(can_bus, source_address, name)
-        if success:
-            #print(f"Successfully claimed Source Address {source_address}")
-            break
-        else:
-            source_address += 1
-
-    if source_address > 253:
-        print("Failed to claim any address on the network.")
-        # Handle failure (e.g., reset or halt operation)
 
     # sending temperature bmp 1
     temperature_celsius = bmp1.temperature  # temperature value in degrees celsius
     temp_instance = 0x01  # bmp1 source = 1
     temp_source = 0x01    # outside temperature
     send_temperature(can_bus, temperature_celsius, temp_instance, temp_source, source_address)
-
-
-
-    # get source address
-    source_address = 0  # Starting address
-    while source_address <= 253:
-        success = claim_address(can_bus, source_address, name)
-        if success:
-            #print(f"Successfully claimed Source Address {source_address}")
-            break
-        else:
-            source_address += 1
-
-    if source_address > 253:
-        print("Failed to claim any address on the network.")
-        # Handle failure (e.g., reset or halt operation)
+    temperature_count += 1
 
     # sending pressure bmp 1
     pressure_pascals = bmp1.pressure * 100  # pressure value in Pa (converted from hPa)
     pressure_instance = 0x01  # bmp1 source = 1
     pressure_source = 0x00    # atmospheric pressure
     send_pressure(can_bus, pressure_pascals, pressure_instance, pressure_source, source_address)
-
-
-
-    # get source address
-    source_address = 0  # Starting address
-    while source_address <= 253:
-        success = claim_address(can_bus, source_address, name)
-        if success:
-            print(f"Successfully claimed Source Address {source_address}")
-            break
-        else:
-            source_address += 1
-
-    if source_address > 253:
-        print("Failed to claim any address on the network.")
-        # Handle failure (e.g., reset or halt operation)
+    pressure_count += 1
 
     # sending humidity aht 2
     humidity_percentage = aht2.relative_humidity  # relative humidity in percent
@@ -506,22 +477,9 @@ while True:
     humidity_source = 0x00    # inside humidity
     send_humidity(can_bus, humidity_percentage, humidity_instance, humidity_source, source_address)
     # Print the humidity data for debugging
-    print(f"Humidity: {humidity_percentage:.2f}%, Instance: {humidity_instance}, Source: {humidity_source}")
+    #print(f"Humidity: {humidity_percentage:.2f}%, Instance: {humidity_instance}, Source: {humidity_source}")
+    humidity_count += 1
 
-
-    # get source address
-    source_address = 0  # Starting address
-    while source_address <= 253:
-        success = claim_address(can_bus, source_address, name)
-        if success:
-            print(f"Successfully claimed Source Address {source_address}")
-            break
-        else:
-            source_address += 1
-
-    if source_address > 253:
-        print("Failed to claim any address on the network.")
-        # Handle failure (e.g., reset or halt operation)
 
 
     # sending current data
@@ -532,21 +490,8 @@ while True:
     current = (sensor_voltage / 5.0) * 100.0  # Based on sensor's 0-5V to 0-100A mapping
     battery_instance = 0x01
     send_battery_status(can_bus, current, battery_instance, source_address)
-    # get source address
-    source_address = 0  # Starting address
-    while source_address <= 253:
-        success = claim_address(can_bus, source_address, name)
-        if success:
-            print(f"Successfully claimed Source Address {source_address}")
-            break
-        else:
-            source_address += 1
-
-    if source_address > 253:
-        print("Failed to claim any address on the network.")
-        # Handle failure (e.g., reset or halt operation)
-
-
+    current_count += 1
+   
     voltage1 = read_voltage(analog_pin1)
     # Calculate the original sensor voltage before the voltage divider
     sensor_voltage1 = voltage1 * 1.5  # Account for voltage divider (R1 + R2) / R2
@@ -555,22 +500,8 @@ while True:
     battery_instance = 0x02
     send_battery_status(can_bus, current1, battery_instance, source_address)
     # Debugging print statements to view values
-    print(f"Voltage1: {voltage1:.4f} V")  # Print voltage with 4 decimal places
+    #print(f"Voltage1: {voltage1:.4f} V")  # Print voltage with 4 decimal places
     #print(f"Current A1: {current_A1:.4f} A")  # Print current with 4 decimal places
-
-    # get source address
-    source_address = 0  # Starting address
-    while source_address <= 253:
-        success = claim_address(can_bus, source_address, name)
-        if success:
-            print(f"Successfully claimed Source Address {source_address}")
-            break
-        else:
-            source_address += 1
-
-    if source_address > 253:
-        print("Failed to claim any address on the network.")
-        # Handle failure (e.g., reset or halt operation)
 
 
     voltage2 = read_voltage(analog_pin2)
@@ -581,10 +512,35 @@ while True:
     battery_instance = 0x02
     send_battery_status(can_bus, current2, battery_instance, source_address)
     # Debugging print statements to view values
-    print(f"Voltage1: {voltage2:.4f} V")  # Print voltage with 4 decimal places
-    #print(f"Current A1: {current_A1:.4f} A")  # Print current with 4 decimal places
+    #print(f"Voltage2: {voltage2:.4f} V")  # Print voltage with 4 decimal places
+    #print(f"Current A2: {current_A2:.4f} A")  # Print current with 4 decimal places
 
-
+     # Check if it's time to calculate and print frequencies
+    current_time = time.monotonic()
+    if current_time - start_time >= interval:
+        elapsed_time = current_time - start_time
+        # Calculate frequencies
+        attitude_freq = attitude_count / elapsed_time
+        temperature_freq = temperature_count / elapsed_time
+        print(f"count: {temperature_count:.2f}")
+        print(f"time: {elapsed_time:.2f}")
+        pressure_freq = pressure_count / elapsed_time
+        humidity_freq = humidity_count / elapsed_time
+        current_freq = current_count / elapsed_time
+        # Print frequencies
+        print(f"Frequencies over {elapsed_time:.2f} seconds:")
+        print(f"Attitude messages per second: {attitude_freq:.2f} Hz")
+        print(f"Temperature messages per second: {temperature_freq:.2f} Hz")
+        print(f"Pressure messages per second: {pressure_freq:.2f} Hz")
+        print(f"Humidity messages per second: {humidity_freq:.2f} Hz")
+        print(f"Current messages per second: {current_freq:.2f} Hz")
+        # Reset counters and start_time
+        attitude_count = 0
+        temperature_count = 0
+        pressure_count = 0
+        humidity_count = 0
+        current_count = 0
+        start_time = current_time
 
 
 
