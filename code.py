@@ -36,9 +36,11 @@ i2c = board.I2C()  # uses board.SCL and board.SDA
 # Create the TCA9548A object and give it the I2C bus
 tca = adafruit_tca9548a.TCA9548A(i2c)
 
-def get_voltage(pin):
-    return (pin.value * 3.3) / 65535
-
+# Function to read voltage at the ADC pin
+def read_voltage(pin):
+    # Convert raw ADC value to voltage
+    return (pin.value / 65535) * 3.3  # Use 65535 for a 16-bit ADC
+    
 def send_temperature(can_bus, temperature_celsius, temp_instance, temp_source, Source_Address, Priority=5, PGN=130312):
     global TempSID
     # Convert temperature to 0.01°C units
@@ -366,13 +368,13 @@ cs = DigitalInOut(board.CAN_CS)
 cs.switch_to_output()
 spi = board.SPI()
 
-can_bus = CAN(
-    spi, cs, loopback=True, silent=True
-)  # use loopback to test without another device
-
 #can_bus = CAN(
-#    spi, cs, loopback=False, silent=False
-#)  # use loopback to test with another device
+#    spi, cs, loopback=True, silent=True
+#)  # use loopback to test without another device
+
+can_bus = CAN(
+    spi, cs, loopback=False, silent=False
+)  # use loopback to test with another device
 
 while True:
     
@@ -504,7 +506,7 @@ while True:
     humidity_source = 0x00    # inside humidity
     send_humidity(can_bus, humidity_percentage, humidity_instance, humidity_source, source_address)
     # Print the humidity data for debugging
-    print(f"Humidity: {humidity_percentage:.2f}%, Instance: {humidity_instance}, Source: {humidity_source}")
+    #print(f"Humidity: {humidity_percentage:.2f}%, Instance: {humidity_instance}, Source: {humidity_source}")
 
 
     # get source address
@@ -523,10 +525,13 @@ while True:
 
 
     # sending current data
-    voltage = get_voltage(analog_pin)
-    current_A = (voltage / 3.3) * 100  # Map 0-3.3V to 0-100A
+    voltage = read_voltage(analog_pin)
+    # Calculate the original sensor voltage before the voltage divider
+    sensor_voltage = voltage * 1.5  # Account for voltage divider (R1 + R2) / R2
+    # Calculate the current
+    current = (sensor_voltage / 5.0) * 100.0  # Based on sensor's 0-5V to 0-100A mapping
     battery_instance = 0x01
-    send_battery_status(can_bus, current_A, battery_instance, source_address)
+    send_battery_status(can_bus, current, battery_instance, source_address)
     # get source address
     source_address = 0  # Starting address
     while source_address <= 253:
@@ -542,13 +547,16 @@ while True:
         # Handle failure (e.g., reset or halt operation)
 
 
-    voltage1 = get_voltage(analog_pin1)
-    current_A1 = (voltage1 / 3.3) * 100  # Map 0-3.3V to 0-100A
+    voltage1 = read_voltage(analog_pin1)
+    # Calculate the original sensor voltage before the voltage divider
+    sensor_voltage1 = voltage1 * 1.5  # Account for voltage divider (R1 + R2) / R2
+    # Calculate the current
+    current1 = (sensor_voltage1 / 5.0) * 100.0  # Based on sensor's 0-5V to 0-100A mapping
     battery_instance = 0x02
-    send_battery_status(can_bus, current_A1, battery_instance, source_address)
+    send_battery_status(can_bus, current1, battery_instance, source_address)
     # Debugging print statements to view values
     print(f"Voltage1: {voltage1:.4f} V")  # Print voltage with 4 decimal places
-    print(f"Current A1: {current_A1:.4f} A")  # Print current with 4 decimal places
+    #print(f"Current A1: {current_A1:.4f} A")  # Print current with 4 decimal places
 
     # get source address
     source_address = 0  # Starting address
@@ -565,11 +573,16 @@ while True:
         # Handle failure (e.g., reset or halt operation)
 
 
-    voltage2 = get_voltage(analog_pin2)
-    current_A2 = (voltage2 / 3.3) * 100  # Map 0-3.3V to 0-100A
-    battery_instance = 0x03
-    send_battery_status(can_bus, current_A2, battery_instance, source_address)
-
+    voltage2 = read_voltage(analog_pin2)
+    # Calculate the original sensor voltage before the voltage divider
+    sensor_voltage2 = voltage2 * 1.5  # Account for voltage divider (R1 + R2) / R2
+    # Calculate the current
+    current2 = (sensor_voltage2 / 5.0) * 100.0  # Based on sensor's 0-5V to 0-100A mapping
+    battery_instance = 0x02
+    send_battery_status(can_bus, current2, battery_instance, source_address)
+    # Debugging print statements to view values
+    print(f"Voltage1: {voltage2:.4f} V")  # Print voltage with 4 decimal places
+    #print(f"Current A1: {current_A1:.4f} A")  # Print current with 4 decimal places
 
 
 
