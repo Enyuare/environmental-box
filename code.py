@@ -26,7 +26,6 @@ HumiditySID = 0
 BatterySID = 0
 AttitudeSID = 0
 
-
 analog_pin = analogio.AnalogIn(board.A0)
 analog_pin1 = analogio.AnalogIn(board.A1)
 analog_pin2 = analogio.AnalogIn(board.A2)
@@ -40,7 +39,7 @@ tca = adafruit_tca9548a.TCA9548A(i2c)
 def read_voltage(pin):
     # Convert raw ADC value to voltage
     return (pin.value / 65535) * 3.3  # Use 65535 for a 16-bit ADC
-    
+
 def send_temperature(can_bus, temperature_celsius, temp_instance, temp_source, Source_Address, Priority=5, PGN=130312):
     global TempSID
     # Convert temperature to 0.01°C units
@@ -70,7 +69,7 @@ def send_temperature(can_bus, temperature_celsius, temp_instance, temp_source, S
 
     # Create and send the CAN message
     message = Message(id=CAN_ID, data=datatemp, extended=True)
-    send_success = can_bus.send(message)
+    #send_success = can_bus.send(message)
     #print(f"Sent Temperature: {temperature_celsius:.2f}°C, Instance: {temp_instance}, Source: {temp_source}, Success: {send_success}")
     #print(f"Sent CAN ID: {hex(CAN_ID)}, Data: {datatemp.hex()}")
 
@@ -78,7 +77,7 @@ def send_temperature(can_bus, temperature_celsius, temp_instance, temp_source, S
     if TempSID == 252:
         TempSID = 0
 
-def send_pressure(can_bus, pressure_pascals, pressure_instance, pressure_source, Source_Address, Priority=6, PGN=130313):
+def send_pressure(can_bus, pressure_pascals, pressure_instance, pressure_source, Source_Address, Priority=5, PGN=130314):
     global PressureSID
     # Encode the pressure as a 32-bit float, little-endian
     Actual_Pressure_bytes = struct.pack('<f', pressure_pascals)
@@ -99,14 +98,14 @@ def send_pressure(can_bus, pressure_pascals, pressure_instance, pressure_source,
 
     # Create and send the CAN message
     message_pressure = Message(id=CAN_ID, data=data_pressure, extended=True)
-    send_success = can_bus.send(message_pressure)
+    #send_success = can_bus.send(message_pressure)
     #print(f"Sent Pressure: {pressure_pascals:.2f} Pa, Instance: {pressure_instance}, Source: {pressure_source}, Success: {send_success}")
 
     PressureSID = PressureSID + 1
     if PressureSID == 252:
         PressureSID = 0
 
-def send_humidity(can_bus, humidity_percentage, humidity_instance, humidity_source, Source_Address, Priority=6, PGN=130314):
+def send_humidity(can_bus, humidity_percentage, humidity_instance, humidity_source, Source_Address, Priority=5, PGN=130313):
     global HumiditySID
     # Scale the humidity value: value = humidity / 0.004
     Actual_Humidity = int(humidity_percentage / 0.004)
@@ -139,7 +138,7 @@ def send_humidity(can_bus, humidity_percentage, humidity_instance, humidity_sour
 
     # Create and send the CAN message
     message_humidity = Message(id=CAN_ID, data=data_humidity, extended=True)
-    send_success = can_bus.send(message_humidity)
+    #send_success = can_bus.send(message_humidity)
     #print(f"Sent Humidity: {humidity_percentage:.2f}%, Instance: {humidity_instance}, Source: {humidity_source}, Success: {send_success}")
     #print(f"Sent CAN ID: {hex(CAN_ID)}, Data: {data_humidity.hex()}")
     HumiditySID = HumiditySID + 1
@@ -159,12 +158,12 @@ def send_battery_status(can_bus, current_A, battery_instance, Source_Address, Pr
 
     # Construct data payload
     data_battery = bytes([
-        BatterySID,
         battery_instance,
         0xFF, 0xFF,  # Voltage set to Data Not Available (since you only want current)
         Current_bytes[0],
         Current_bytes[1],
         0xFF, 0xFF  # Temperature set to Data Not Available (since you only want current)
+        BatterySID
     ])
 
     # Construct the CAN ID
@@ -172,7 +171,7 @@ def send_battery_status(can_bus, current_A, battery_instance, Source_Address, Pr
 
     # Create and send the CAN message
     message_battery = Message(id=CAN_ID, data=data_battery, extended=True)
-    send_success = can_bus.send(message_battery)
+    #send_success = can_bus.send(message_battery)
     # Optionally, print the send status
     # print(f"Sent Battery Status: Voltage: {voltage_V:.2f}V, Current: {current_A:.2f}A, Instance: {battery_instance}, Success: {send_success}")
 
@@ -182,7 +181,7 @@ def send_battery_status(can_bus, current_A, battery_instance, Source_Address, Pr
         BatterySID = 0
 
 
-def send_attitude(can_bus, yaw_radians, pitch_radians, roll_radians, Source_Address, Priority=2, PGN=127257):
+def send_attitude(can_bus, yaw_radians, pitch_radians, roll_radians, Source_Address, Priority=3, PGN=127257):
     global AttitudeSID
 
     # Scale the angles (radians to scaled integer)
@@ -215,7 +214,7 @@ def send_attitude(can_bus, yaw_radians, pitch_radians, roll_radians, Source_Addr
 
     # Create and send the CAN message
     message = Message(id=CAN_ID, data=data, extended=True)
-    send_success = can_bus.send(message)
+    #send_success = can_bus.send(message)
 
     # Uncomment below to print the sent data for debugging
     #print(f"Sent Attitude: Yaw={yaw_radians:.4f} rad, Pitch={pitch_radians:.4f} rad, Roll={roll_radians:.4f} rad")
@@ -356,6 +355,10 @@ aht2 = adafruit_ahtx0.AHTx0(tca[2])  # TCA Channel 2
 
 #print('here1')
 i2c = board.I2C()
+cs = DigitalInOut(board.CAN_CS)
+cs.switch_to_output()
+spi = board.SPI()
+
 bno = BNO08X_I2C(i2c)
 bno.enable_feature(BNO_REPORT_ACCELEROMETER)
 bno.enable_feature(BNO_REPORT_GYROSCOPE)
@@ -364,16 +367,12 @@ bno.enable_feature(BNO_REPORT_ROTATION_VECTOR)
 
 
 # CAN Configuration
-cs = DigitalInOut(board.CAN_CS)
-cs.switch_to_output()
-spi = board.SPI()
-
 #can_bus = CAN(
 #    spi, cs, loopback=True, silent=True
 #)  # use loopback to test without another device
 
 can_bus = CAN(
-    spi, cs, loopback=True, silent=True
+    spi, cs, loopback=False, silent=False
 )  # use loopback to test with another device
 
 # set up name for address claim
@@ -393,11 +392,11 @@ name = construct_name(
     system_instance, industry_group, arbitrary_address_capable
 )
 # get source address
-source_address = 0  # Starting address
+source_address = 217  # Starting address
 while source_address <= 253:
     success = claim_address(can_bus, source_address, name)
     if success:
-        #print(f"Successfully claimed Source Address {source_address}")
+        print(f"Successfully claimed Source Address {source_address}")
         break
     else:
         source_address += 1
@@ -406,7 +405,7 @@ if source_address > 253:
     print("Failed to claim any address on the network.")
     # Handle failure (e.g., reset or halt operation)
 
-    
+
 
 # Initialize counters and timing variables
 attitude_count = 0
@@ -424,14 +423,14 @@ while True:
     #print("Pressure: {:6.1f}".format(bmp1.pressure))
     #print("Temperature: {:5.2f}".format(bmp1.temperature))
     # Look at your local weather report for a pressure at sea level reading
-    #bmp1.sea_level_pressure = 1013.25 // this is for altitude readings 
+    #bmp1.sea_level_pressure = 1013.25 // this is for altitude readings
     #print('Altitude: {} meters'.format(bmp1.altitude))
 
     # Initialize max tracking variables
     max_current, max_current1, max_current2 = 0, 0, 0
-    
+
     max_yaw, max_pitch, max_roll = 0, 0, 0
-    
+
     for i in range(1):
         for j in range(50):
             # Attitude readings
@@ -448,9 +447,9 @@ while True:
             # Current readings
             voltage = read_voltage(analog_pin)
             sensor_voltage = voltage * 1.5
-            current = (sensor_voltage / 5.0) * 100.0
+            current = (sensor_voltage / 5.0) * 200.0
             max_current = max(max_current, current)
-            
+
             # Current readings
             voltage1 = read_voltage(analog_pin1)
             sensor_voltage1 = voltage1 * 1.5
@@ -466,8 +465,8 @@ while True:
 
         # Send max attitude
         send_attitude(can_bus, max_yaw, max_pitch, max_roll, source_address)
-        attitude_count += 1 
-        
+        attitude_count += 1
+
         # Send max current
         battery_instance = 0x01
         send_battery_status(can_bus, max_current, battery_instance, source_address)
@@ -509,25 +508,25 @@ while True:
     humidity_count += 1
 
 
-     # Check if it's time to calculate and print frequencies
+    # Check if it's time to calculate and print frequencies
     current_time = time.monotonic()
     if current_time - start_time >= interval:
         elapsed_time = current_time - start_time
         # Calculate frequencies
         attitude_freq = attitude_count / elapsed_time
         temperature_freq = temperature_count / elapsed_time
-        print(f"count: {temperature_count:.2f}")
-        print(f"time: {elapsed_time:.2f}")
+        #print(f"count: {temperature_count:.2f}")
+        #print(f"time: {elapsed_time:.2f}")
         pressure_freq = pressure_count / elapsed_time
         humidity_freq = humidity_count / elapsed_time
         current_freq = current_count / elapsed_time
         # Print frequencies
-        print(f"Frequencies over {elapsed_time:.2f} seconds:")
-        print(f"Attitude messages per second: {attitude_freq:.2f} Hz")
-        print(f"Temperature messages per second: {temperature_freq:.2f} Hz")
-        print(f"Pressure messages per second: {pressure_freq:.2f} Hz")
-        print(f"Humidity messages per second: {humidity_freq:.2f} Hz")
-        print(f"Current messages per second: {current_freq:.2f} Hz")
+        #print(f"Frequencies over {elapsed_time:.2f} seconds:")
+        #print(f"Attitude messages per second: {attitude_freq:.2f} Hz")
+        #print(f"Temperature messages per second: {temperature_freq:.2f} Hz")
+        #print(f"Pressure messages per second: {pressure_freq:.2f} Hz")
+        #print(f"Humidity messages per second: {humidity_freq:.2f} Hz")
+        #print(f"Current messages per second: {current_freq:.2f} Hz")
         # Reset counters and start_time
         attitude_count = 0
         temperature_count = 0
