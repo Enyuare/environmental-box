@@ -162,7 +162,7 @@ def send_battery_status(can_bus, current_A, battery_instance, Source_Address, Pr
         0xFF, 0xFF,  # Voltage set to Data Not Available (since you only want current)
         Current_bytes[0],
         Current_bytes[1],
-        0xFF, 0xFF  # Temperature set to Data Not Available (since you only want current)
+        0xFF, 0xFF,  # Temperature set to Data Not Available (since you only want current)
         BatterySID
     ])
 
@@ -171,9 +171,9 @@ def send_battery_status(can_bus, current_A, battery_instance, Source_Address, Pr
 
     # Create and send the CAN message
     message_battery = Message(id=CAN_ID, data=data_battery, extended=True)
-    #send_success = can_bus.send(message_battery)
+    send_success = can_bus.send(message_battery)
     # Optionally, print the send status
-    # print(f"Sent Battery Status: Voltage: {voltage_V:.2f}V, Current: {current_A:.2f}A, Instance: {battery_instance}, Success: {send_success}")
+    print(f"Sent Battery Status: Current: {Current:.2f}A, Instance: {battery_instance}, Success: {send_success}")
 
     # Update BatterySID
     BatterySID += 1
@@ -372,7 +372,7 @@ bno.enable_feature(BNO_REPORT_ROTATION_VECTOR)
 #)  # use loopback to test without another device
 
 can_bus = CAN(
-    spi, cs, loopback=False, silent=False
+    spi, cs, loopback=True, silent=True
 )  # use loopback to test with another device
 
 # set up name for address claim
@@ -446,19 +446,19 @@ while True:
 
             # Current readings
             voltage = read_voltage(analog_pin)
-            sensor_voltage = voltage * 1.5
+            sensor_voltage = voltage * (5.0 / 3.0)
             current = (sensor_voltage / 5.0) * 200.0
             max_current = max(max_current, current)
 
             # Current readings
             voltage1 = read_voltage(analog_pin1)
-            sensor_voltage1 = voltage1 * 1.5
+            sensor_voltage1 = voltage1 * (5.0 / 3.0)
             current1 = (sensor_voltage1 / 5.0) * 100.0
             max_current1 = max(max_current1, current1)
 
             # Current readings
             voltage2 = read_voltage(analog_pin2)
-            sensor_voltage2 = voltage2 * 1.5
+            sensor_voltage2 = voltage2 * (5.0 / 3.0)
             current2 = (sensor_voltage2 / 5.0) * 100.0
             max_current2 = max(max_current2, current2)
 
@@ -534,6 +534,3 @@ while True:
         humidity_count = 0
         current_count = 0
         start_time = current_time
-
-
-
