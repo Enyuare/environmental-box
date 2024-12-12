@@ -12,13 +12,7 @@ import math
 from digitalio import DigitalInOut
 from adafruit_mcp2515.canio import Message, RemoteTransmissionRequest
 from adafruit_mcp2515 import MCP2515 as CAN
-from adafruit_bno08x.i2c import BNO08X_I2C
-from adafruit_bno08x import (
-    BNO_REPORT_ACCELEROMETER,
-    BNO_REPORT_GYROSCOPE,
-    BNO_REPORT_MAGNETOMETER,
-    BNO_REPORT_ROTATION_VECTOR,
-)
+from adafruit_bno08x_rvc import BNO08x_RVC
 
 TempSID = 0
 PressureSID = 0
@@ -29,6 +23,9 @@ AttitudeSID = 0
 analog_pin = analogio.AnalogIn(board.A0)
 analog_pin1 = analogio.AnalogIn(board.A1)
 analog_pin2 = analogio.AnalogIn(board.A2)
+
+uart = busio.UART(board.TX, board.RX, baudrate=115200, receiver_buffer_size=2048)
+rvc = BNO08x_RVC(uart)
 
 # Create I2C bus as normal
 i2c = board.I2C()  # uses board.SCL and board.SDA
@@ -173,7 +170,7 @@ def send_battery_status(can_bus, current_A, battery_instance, Source_Address, Pr
     message_battery = Message(id=CAN_ID, data=data_battery, extended=True)
     send_success = can_bus.send(message_battery)
     # Optionally, print the send status
-    print(f"Sent Battery Status: Current: {Current:.2f}A, Instance: {battery_instance}, Success: {send_success}")
+    # print(f"Sent Battery Status: Current: {Current:.2f}A, Instance: {battery_instance}, Success: {send_success}")
 
     # Update BatterySID
     BatterySID += 1
@@ -184,10 +181,16 @@ def send_battery_status(can_bus, current_A, battery_instance, Source_Address, Pr
 def send_attitude(can_bus, yaw_radians, pitch_radians, roll_radians, Source_Address, Priority=3, PGN=127257):
     global AttitudeSID
 
-    # Scale the angles (radians to scaled integer)
+    # Scale the angles (radians to scaled int21eger)
     yaw_scaled = int(yaw_radians * 10000)
     pitch_scaled = int(pitch_radians * 10000)
     roll_scaled = int(roll_radians * 10000)
+
+    # Print the scaled values
+    # print(f"Yaw (scaled): {yaw_scaled}")
+    # print(f"Pitch (scaled): {pitch_scaled}")
+    # print(f"Roll (scaled): {roll_scaled}")
+
 
     # Convert scaled values to bytes (little-endian, signed)
     yaw_bytes = yaw_scaled.to_bytes(2, 'little', signed=True)
@@ -284,26 +287,6 @@ def claim_address(can_bus, source_address, name):
             else:
                 time.sleep(0.01)
     return not conflict
-def quaternion_to_euler(w, x, y, z):
-    # Convert quaternion to Euler angles (yaw, pitch, roll)
-    # Roll (x-axis rotation)
-    sinr_cosp = 2 * (w * x + y * z)
-    cosr_cosp = 1 - 2 * (x * x + y * y)
-    roll = math.atan2(sinr_cosp, cosr_cosp)
-
-    # Pitch (y-axis rotation)
-    sinp = 2 * (w * y - z * x)
-    if abs(sinp) >= 1:
-        pitch = math.copysign(math.pi / 2, sinp)  # Use 90 degrees if out of range
-    else:
-        pitch = math.asin(sinp)
-
-    # Yaw (z-axis rotation)
-    siny_cosp = 2 * (w * z + x * y)
-    cosy_cosp = 1 - 2 * (y * y + z * z)
-    yaw = math.atan2(siny_cosp, cosy_cosp)
-
-    return yaw, pitch, roll
 
 for channel in range(8):
     print(f"Scanning PCA9548 channel {channel}")
@@ -318,7 +301,6 @@ for channel in range(8):
 # Connect to sensor boards via I2C
 i2c = board.I2C()
 tca = adafruit_tca9548a.TCA9548A(i2c) #For the Multiplexor (PCA9548)
-
 
 # For temperature/pressure (BMP390)
 # Create each BMP390 using the TCA9548A channel instead of the I2C object
@@ -352,19 +334,9 @@ aht2 = adafruit_ahtx0.AHTx0(tca[2])  # TCA Channel 2
 #aht6 = adafruit_ahtx0.AHTx0(tca[6])  # TCA Channel 6
 #aht7 = adafruit_ahtx0.AHTx0(tca[7])  # TCA Channel 7
 
-
-#print('here1')
-i2c = board.I2C()
 cs = DigitalInOut(board.CAN_CS)
 cs.switch_to_output()
 spi = board.SPI()
-
-bno = BNO08X_I2C(i2c)
-bno.enable_feature(BNO_REPORT_ACCELEROMETER)
-bno.enable_feature(BNO_REPORT_GYROSCOPE)
-bno.enable_feature(BNO_REPORT_MAGNETOMETER)
-bno.enable_feature(BNO_REPORT_ROTATION_VECTOR)
-
 
 # CAN Configuration
 #can_bus = CAN(
@@ -406,7 +378,6 @@ if source_address > 253:
     # Handle failure (e.g., reset or halt operation)
 
 
-
 # Initialize counters and timing variables
 attitude_count = 0
 temperature_count = 0
@@ -416,16 +387,7 @@ current_count = 0
 start_time = time.monotonic()
 interval = 5  # Interval in seconds to calculate and print frequencies
 
-
 while True:
-    # to use bmp data
-    # bmp1.pressure, bpm1.temperature, bmp1.altitude
-    #print("Pressure: {:6.1f}".format(bmp1.pressure))
-    #print("Temperature: {:5.2f}".format(bmp1.temperature))
-    # Look at your local weather report for a pressure at sea level reading
-    #bmp1.sea_level_pressure = 1013.25 // this is for altitude readings
-    #print('Altitude: {} meters'.format(bmp1.altitude))
-
     # Initialize max tracking variables
     max_current, max_current1, max_current2 = 0, 0, 0
 
@@ -434,37 +396,46 @@ while True:
     for i in range(1):
         for j in range(50):
             # Attitude readings
-            quat = bno.quaternion  # Get quaternion data
-            if quat is not None:
-                w, x, y, z = quat
-                yaw, pitch, roll = quaternion_to_euler(w, x, y, z)
+            roll, pitch, yaw, x_accel, y_accel, z_accel = rvc.heading
+            # print("Roll: %2.2f Pitch: %2.2f Yaw: %2.2f Degrees" % (roll, pitch, yaw))
+            # Track max values
+            max_yaw = max(max_yaw, abs(yaw))
+            max_pitch = max(max_pitch, abs(pitch))
+            max_roll = max(max_roll, abs(roll))
 
-                # Track max values
-                max_yaw = max(max_yaw, abs(yaw))
-                max_pitch = max(max_pitch, abs(pitch))
-                max_roll = max(max_roll, abs(roll))
-
-            # Current readings
+            # Current readings for sensor 1
             voltage = read_voltage(analog_pin)
-            sensor_voltage = voltage * (5.0 / 3.0)
+            sensor_voltage = voltage * 1.5
             current = (sensor_voltage / 5.0) * 200.0
             max_current = max(max_current, current)
+            print(f"Current Sensor 1: {current:.2f} A (Max: {max_current:.2f} A)")
 
-            # Current readings
+            # Current readings for sensor 2
             voltage1 = read_voltage(analog_pin1)
-            sensor_voltage1 = voltage1 * (5.0 / 3.0)
+            sensor_voltage1 = voltage1 * 1.5
             current1 = (sensor_voltage1 / 5.0) * 100.0
             max_current1 = max(max_current1, current1)
+            print(f"Current Sensor 2: {current1:.2f} A (Max: {max_current1:.2f} A)")
 
-            # Current readings
+            # Current readings for sensor 3
             voltage2 = read_voltage(analog_pin2)
-            sensor_voltage2 = voltage2 * (5.0 / 3.0)
+            sensor_voltage2 = voltage2 * 1.5
             current2 = (sensor_voltage2 / 5.0) * 100.0
             max_current2 = max(max_current2, current2)
+            print(f"Current Sensor 3: {current2:.2f} A (Max: {max_current2:.2f} A)")
 
+        # Convert from degrees to radians
+        roll_radians = max_roll * (math.pi / 180.0)
+        pitch_radians = max_pitch * (math.pi / 180.0)
+        yaw_radians = max_yaw * (math.pi / 180.0)
+
+        # Print the converted values in a formatted way
+        # print(f"Roll (radians): {roll_radians:.4f}")
+        # print(f"Pitch (radians): {pitch_radians:.4f}")
+        # print(f"Yaw (radians): {yaw_radians:.4f}")
 
         # Send max attitude
-        send_attitude(can_bus, max_yaw, max_pitch, max_roll, source_address)
+        send_attitude(can_bus, yaw_radians, pitch_radians, roll_radians, source_address)
         attitude_count += 1
 
         # Send max current
@@ -490,6 +461,7 @@ while True:
     temp_source = 0x01    # outside temperature
     send_temperature(can_bus, temperature_celsius, temp_instance, temp_source, source_address)
     temperature_count += 1
+    # print(f"Temperature in Celsius: {temperature_celsius:.2f}")
 
     # sending pressure bmp 1
     pressure_pascals = bmp1.pressure * 100  # pressure value in Pa (converted from hPa)
@@ -497,6 +469,7 @@ while True:
     pressure_source = 0x00    # atmospheric pressure
     send_pressure(can_bus, pressure_pascals, pressure_instance, pressure_source, source_address)
     pressure_count += 1
+    # print(f"Pressure in Pa: {pressure_pascals:.2f}")
 
     # sending humidity aht 2
     humidity_percentage = aht2.relative_humidity  # relative humidity in percent
@@ -506,6 +479,7 @@ while True:
     # Print the humidity data for debugging
     #print(f"Humidity: {humidity_percentage:.2f}%, Instance: {humidity_instance}, Source: {humidity_source}")
     humidity_count += 1
+    #print(f"Humidity: {humidity_percentage:.2f}")
 
 
     # Check if it's time to calculate and print frequencies
@@ -534,3 +508,4 @@ while True:
         humidity_count = 0
         current_count = 0
         start_time = current_time
+
