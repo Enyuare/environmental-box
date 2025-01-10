@@ -6,7 +6,6 @@ import busio
 import adafruit_tca9548a
 import adafruit_bmp3xx
 import adafruit_ahtx0
-import adafruit_lsm9ds1
 import analogio
 import math
 from digitalio import DigitalInOut
@@ -37,47 +36,115 @@ def read_voltage(pin):
     # Convert raw ADC value to voltage
     return (pin.value / 65535) * 3.3  # Use 65535 for a 16-bit ADC
 
-def send_temperature(can_bus, temperature_celsius, temp_instance, temp_source, Source_Address, Priority=5, PGN=130312):
+"""
+    Build the NMEA 2000 message in the requested byte format:
+
+      Byte Number   Byte Description                          Note
+      0             Message Priority                          Bits 0 - 2 are significant, other bits ignored
+      1 to 3        NMEA 2000 PGN                            LSB is first
+      4             Destination Address                       Or 255 decimal for global addressed
+      5             Source Address                            (Ignored in outgoing, but we fill it)
+      6—9           Time Stamp                                Device’s time in ms, ignored in outgoing
+      10            Size of Payload                           Number of bytes in NMEA 2000 message payload (1..232)
+      11+           Message Payload                           1..232 bytes of message payload
+
+"""
+
+def send_temperature(can_bus, temperature_celsius, temp_instance, temp_source, Source_Address, Priority=5, PGN=130316):
     global TempSID
-    # Convert temperature to 0.01°C units
-    Temperature = int(temperature_celsius * 100)
-    Temperature_bytes = Temperature.to_bytes(2, 'little', signed=True)
+    # Print received temperature in Celsius
+    #print(f"Received Temperature (Celsius): {temperature_celsius:.2f}°C")
+
+    # Convert temperature to Kelvin
+    temperature_kelvin = temperature_celsius + 273.15
+    #print(f"Converted Temperature (Kelvin): {temperature_kelvin:.2f} K")
+
+    # Actual Temperature: encode as uint24
+    Actual_Temperature = int(temperature_kelvin * 1000)
+    Actual_Temperature_bytes = Actual_Temperature.to_bytes(3, 'little', signed=False)
+    #print(f"Actual Temperature Bytes: {Actual_Temperature_bytes.hex()}")
 
     # Set Temperature (not used)
     Set_Temperature_bytes = b'\xFF\x7F'  # Data Not Available
+    #print(f"Set Temperature Bytes: {Set_Temperature_bytes.hex()}")
 
-    # Reserved byte
-    Reserved_byte = 0xFF
 
     # Construct the data payload
-    datatemp = bytes([
+    payload = bytes([
         TempSID,
         temp_instance,
         temp_source,
-        Temperature_bytes[0],
-        Temperature_bytes[1],
+        Actual_Temperature_bytes[0],
+        Actual_Temperature_bytes[1],
+        Actual_Temperature_bytes[2],
         Set_Temperature_bytes[0],
         Set_Temperature_bytes[1],
-        Reserved_byte
     ])
+
+    TempSID = TempSID + 1
+    if TempSID == 252:
+        TempSID = 0
+
+    # --------------------
+    # 2) Build the header (bytes 0 to 10)
+    # --------------------
+    # Prepare a bytearray for the entire message
+    # size = 11 (header bytes) + len(payload)
+    full_size = 11 + len(payload)
+    message = bytearray(full_size)
+
+    # Byte 0: Priority (only bits 0-2 used)
+    message[0] = Priority & 0x07
+
+    # Bytes 1-3: PGN (least significant byte first)
+    # For PGN = 130312, in hex that is 0x1FB18
+    #   LSB = 0x18
+    #   next = 0xB1
+    #   next = 0x1F
+    pgn_le = PGN & 0x00FFFFFF
+    message[1] =  pgn_le        & 0xFF
+    message[2] = (pgn_le >> 8)  & 0xFF
+    message[3] = (pgn_le >> 16) & 0xFF
+
+    # Byte 4: Destination address (255 for broadcast)
+    message[4] = 0xFF
+
+    # Byte 5: Source address (often ignored in the final message, but we fill it)
+    message[5] = Source_Address & 0xFF
+
+    # Bytes 6-9: Time Stamp (ignored for outgoing, set to 0)
+    message[6] = 0
+    message[7] = 0
+    message[8] = 0
+    message[9] = 0
+
+    # Byte 10: Size of the payload
+    message[10] = len(payload)
+
+    # --------------------
+    # 3) Insert the payload at byte 11+
+    # --------------------
+    message[11:] = payload
+
+    datatemp = message[11:]
 
     # Construct the CAN ID
     CAN_ID = (Priority << 26) | (PGN << 8) | Source_Address
 
     # Create and send the CAN message
     message = Message(id=CAN_ID, data=datatemp, extended=True)
-    #send_success = can_bus.send(message)
+    send_success = can_bus.send(message)
     #print(f"Sent Temperature: {temperature_celsius:.2f}°C, Instance: {temp_instance}, Source: {temp_source}, Success: {send_success}")
-    #print(f"Sent CAN ID: {hex(CAN_ID)}, Data: {datatemp.hex()}")
+    #print(f"Sent Temperature CAN ID: {hex(CAN_ID)}, Data: {datatemp.hex()}, Success: {send_success}")
 
-    TempSID = TempSID + 1
-    if TempSID == 252:
-        TempSID = 0
 
 def send_pressure(can_bus, pressure_pascals, pressure_instance, pressure_source, Source_Address, Priority=5, PGN=130314):
     global PressureSID
     # Encode the pressure as a 32-bit float, little-endian
     Actual_Pressure_bytes = struct.pack('<f', pressure_pascals)
+
+    # Reserved byte
+    Reserved_byte = 0xFF
 
     # Construct the data payload
     data_pressure = bytes([
@@ -87,7 +154,8 @@ def send_pressure(can_bus, pressure_pascals, pressure_instance, pressure_source,
         Actual_Pressure_bytes[0],
         Actual_Pressure_bytes[1],
         Actual_Pressure_bytes[2],
-        Actual_Pressure_bytes[3]
+        Actual_Pressure_bytes[3],
+        Reserved_byte
     ])
 
     # Construct the CAN ID
@@ -95,8 +163,9 @@ def send_pressure(can_bus, pressure_pascals, pressure_instance, pressure_source,
 
     # Create and send the CAN message
     message_pressure = Message(id=CAN_ID, data=data_pressure, extended=True)
-    #send_success = can_bus.send(message_pressure)
+    send_success = can_bus.send(message_pressure)
     #print(f"Sent Pressure: {pressure_pascals:.2f} Pa, Instance: {pressure_instance}, Source: {pressure_source}, Success: {send_success}")
+    #print(f"Sent Pressure CAN ID: {hex(CAN_ID)}, Data: {data_pressure.hex()}, Success: {send_success}")
 
     PressureSID = PressureSID + 1
     if PressureSID == 252:
@@ -135,9 +204,9 @@ def send_humidity(can_bus, humidity_percentage, humidity_instance, humidity_sour
 
     # Create and send the CAN message
     message_humidity = Message(id=CAN_ID, data=data_humidity, extended=True)
-    #send_success = can_bus.send(message_humidity)
+    send_success = can_bus.send(message_humidity)
     #print(f"Sent Humidity: {humidity_percentage:.2f}%, Instance: {humidity_instance}, Source: {humidity_source}, Success: {send_success}")
-    #print(f"Sent CAN ID: {hex(CAN_ID)}, Data: {data_humidity.hex()}")
+    #print(f"Sent Humidity CAN ID: {hex(CAN_ID)}, Data: {data_humidity.hex()}, Success: {send_success}")
     HumiditySID = HumiditySID + 1
     if HumiditySID == 252:
         HumiditySID = 0
@@ -171,6 +240,7 @@ def send_battery_status(can_bus, current_A, battery_instance, Source_Address, Pr
     send_success = can_bus.send(message_battery)
     # Optionally, print the send status
     # print(f"Sent Battery Status: Current: {Current:.2f}A, Instance: {battery_instance}, Success: {send_success}")
+    #print(f"Sent Battery CAN ID: {hex(CAN_ID)}, Data: {data_battery.hex()}, Success: {send_success}")
 
     # Update BatterySID
     BatterySID += 1
@@ -217,11 +287,11 @@ def send_attitude(can_bus, yaw_radians, pitch_radians, roll_radians, Source_Addr
 
     # Create and send the CAN message
     message = Message(id=CAN_ID, data=data, extended=True)
-    #send_success = can_bus.send(message)
+    send_success = can_bus.send(message)
 
     # Uncomment below to print the sent data for debugging
-    #print(f"Sent Attitude: Yaw={yaw_radians:.4f} rad, Pitch={pitch_radians:.4f} rad, Roll={roll_radians:.4f} rad")
-    #print(f"CAN ID: {hex(CAN_ID)}, Data: {data.hex()}, Send Success: {send_success}")
+    # print(f"Sent Attitude: Yaw={yaw_radians:.4f} rad, Pitch={pitch_radians:.4f} rad, Roll={roll_radians:.4f} rad")
+    # print(f"Send Attitude CAN ID: {hex(CAN_ID)}, Data: {data.hex()}, Send Success: {send_success}")
 
     # Increment the Sequence ID (SID)
     AttitudeSID += 1
@@ -262,6 +332,7 @@ def claim_address(can_bus, source_address, name):
     # Send the Address Claim message
     send_success = can_bus.send(message)
     #print(f"Sent Address Claim with Source Address {source_address}, Success: {send_success}")
+    #print(f"Send Address Claim CAN ID: {hex(CAN_ID)}, Data: {name_bytes.hex()}, Send Success: {send_success}")
 
     # Listen for conflicts
     conflict = False
@@ -317,6 +388,7 @@ bmp1 = adafruit_bmp3xx.BMP3XX_I2C(tca[1])  # TCA Channel 1
 #bmp5 = adafruit_bmp3xx.BMP3XX_I2C(tca[5])   # TCA Channel 5
 #bmp6 = adafruit_bmp3xx.BMP3XX_I2C(tca[6])  # TCA Channel 6
 #bmp7 = adafruit_bmp3xx.BMP3XX_I2C(tca[7])  # TCA Channel 7
+#bmp7 = adafruit_bmp3xx.BMP3XX_I2C(tca[7])  # TCA Channel 7
 
 # For temperature/humidity (AHT20)
 # Create each AHT20 using the TCA9548A channel instead of the I2C object
@@ -344,7 +416,7 @@ spi = board.SPI()
 #)  # use loopback to test without another device
 
 can_bus = CAN(
-    spi, cs, loopback=True, silent=True
+    spi, cs, baudrate=250000, loopback=False , silent=False
 )  # use loopback to test with another device
 
 # set up name for address claim
@@ -384,7 +456,7 @@ temperature_count = 0
 pressure_count = 0
 humidity_count = 0
 current_count = 0
-start_time = time.monotonic()
+#start_time = time.monotonic()
 interval = 5  # Interval in seconds to calculate and print frequencies
 
 while True:
@@ -408,21 +480,21 @@ while True:
             sensor_voltage = voltage * 1.5
             current = (sensor_voltage / 5.0) * 200.0
             max_current = max(max_current, current)
-            print(f"Current Sensor 1: {current:.2f} A (Max: {max_current:.2f} A)")
+            #print(f"Current Sensor 1: {current:.2f} A (Max: {max_current:.2f} A)")
 
             # Current readings for sensor 2
             voltage1 = read_voltage(analog_pin1)
             sensor_voltage1 = voltage1 * 1.5
             current1 = (sensor_voltage1 / 5.0) * 100.0
             max_current1 = max(max_current1, current1)
-            print(f"Current Sensor 2: {current1:.2f} A (Max: {max_current1:.2f} A)")
+            #print(f"Current Sensor 2: {current1:.2f} A (Max: {max_current1:.2f} A)")
 
             # Current readings for sensor 3
             voltage2 = read_voltage(analog_pin2)
             sensor_voltage2 = voltage2 * 1.5
             current2 = (sensor_voltage2 / 5.0) * 100.0
             max_current2 = max(max_current2, current2)
-            print(f"Current Sensor 3: {current2:.2f} A (Max: {max_current2:.2f} A)")
+            #print(f"Current Sensor 3: {current2:.2f} A (Max: {max_current2:.2f} A)")
 
         # Convert from degrees to radians
         roll_radians = max_roll * (math.pi / 180.0)
@@ -430,18 +502,18 @@ while True:
         yaw_radians = max_yaw * (math.pi / 180.0)
 
         # Print the converted values in a formatted way
-        # print(f"Roll (radians): {roll_radians:.4f}")
-        # print(f"Pitch (radians): {pitch_radians:.4f}")
-        # print(f"Yaw (radians): {yaw_radians:.4f}")
+        #print(f"Roll (radians): {roll_radians:.4f}")
+        #print(f"Pitch (radians): {pitch_radians:.4f}")
+        #print(f"Yaw (radians): {yaw_radians:.4f}")
 
         # Send max attitude
         send_attitude(can_bus, yaw_radians, pitch_radians, roll_radians, source_address)
-        attitude_count += 1
+        #attitude_count += 1
 
         # Send max current
         battery_instance = 0x01
         send_battery_status(can_bus, max_current, battery_instance, source_address)
-        current_count += 1
+        #current_count += 1
         # Send max current
         battery_instance = 0x02
         send_battery_status(can_bus, max_current1, battery_instance, source_address)
@@ -460,7 +532,7 @@ while True:
     temp_instance = 0x01  # bmp1 source = 1
     temp_source = 0x01    # outside temperature
     send_temperature(can_bus, temperature_celsius, temp_instance, temp_source, source_address)
-    temperature_count += 1
+    #temperature_count += 1
     # print(f"Temperature in Celsius: {temperature_celsius:.2f}")
 
     # sending pressure bmp 1
@@ -468,7 +540,7 @@ while True:
     pressure_instance = 0x01  # bmp1 source = 1
     pressure_source = 0x00    # atmospheric pressure
     send_pressure(can_bus, pressure_pascals, pressure_instance, pressure_source, source_address)
-    pressure_count += 1
+    #pressure_count += 1
     # print(f"Pressure in Pa: {pressure_pascals:.2f}")
 
     # sending humidity aht 2
@@ -478,22 +550,22 @@ while True:
     send_humidity(can_bus, humidity_percentage, humidity_instance, humidity_source, source_address)
     # Print the humidity data for debugging
     #print(f"Humidity: {humidity_percentage:.2f}%, Instance: {humidity_instance}, Source: {humidity_source}")
-    humidity_count += 1
+    #humidity_count += 1
     #print(f"Humidity: {humidity_percentage:.2f}")
 
 
     # Check if it's time to calculate and print frequencies
-    current_time = time.monotonic()
-    if current_time - start_time >= interval:
-        elapsed_time = current_time - start_time
+    # current_time = time.monotonic()
+    #if current_time - start_time >= interval:
+        #elapsed_time = current_time - start_time
         # Calculate frequencies
-        attitude_freq = attitude_count / elapsed_time
-        temperature_freq = temperature_count / elapsed_time
+        #attitude_freq = attitude_count / elapsed_time
+        #temperature_freq = temperature_count / elapsed_time
         #print(f"count: {temperature_count:.2f}")
         #print(f"time: {elapsed_time:.2f}")
-        pressure_freq = pressure_count / elapsed_time
-        humidity_freq = humidity_count / elapsed_time
-        current_freq = current_count / elapsed_time
+       # pressure_freq = pressure_count / elapsed_time
+        #humidity_freq = humidity_count / elapsed_time
+        #current_freq = current_count / elapsed_time
         # Print frequencies
         #print(f"Frequencies over {elapsed_time:.2f} seconds:")
         #print(f"Attitude messages per second: {attitude_freq:.2f} Hz")
@@ -502,10 +574,9 @@ while True:
         #print(f"Humidity messages per second: {humidity_freq:.2f} Hz")
         #print(f"Current messages per second: {current_freq:.2f} Hz")
         # Reset counters and start_time
-        attitude_count = 0
-        temperature_count = 0
-        pressure_count = 0
-        humidity_count = 0
-        current_count = 0
-        start_time = current_time
-
+       # attitude_count = 0
+       # temperature_count = 0
+        #pressure_count = 0
+        #humidity_count = 0
+        #current_count = 0
+        #start_time = current_time
