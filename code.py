@@ -89,33 +89,58 @@ def read_voltage(pin):
 # Helper functions
 def send_message(pgn, data, priority=6):
     """Send a CAN message with the given PGN and data."""
+    # Build CAN ID from PGN and priority
     can_id = (priority << 26) | (pgn << 8) | DEVICE_SOURCE_ADDRESS
-    message = canio.Message(id=can_id, data=bytes(data), extended=True)
-    can.send(message)
+    
+    # Create the message
+    message = Message(id=can_id, data=bytes(data), extended=True)
+    
+    # Send via can_bus instead of can
+    can_bus.send(message)
 
 def receive_message():
-    """Receive and process CAN messages."""
-    if can.in_waiting > 0:
-        message = can.receive()
-        pgn = (message.id >> 8) & 0x1FFFF
-        process_message(pgn, message.data)
+    """Receive and process all waiting CAN messages."""
+    # If there might be more than one message waiting, loop until empty
+    while can_bus.in_waiting > 0:
+        message = can_bus.receive()
+        if message is not None:
+            pgn = (message.id >> 8) & 0x1FFFF
+            process_message(pgn, message.data)
 
 def process_message(pgn, data):
     """Process received messages based on PGN."""
     if pgn == PGN_ADDRESS_CLAIM:
         print("Received Address Claim")
-        # Here, you'd parse the 64-bit NAME from data
-        # Example (assuming the first 8 bytes is the NAME):
-        # received_name = int.from_bytes(data[:8], 'little')
+        # Example of parsing the 64-bit NAME (first 8 bytes, big-endian or little-endian depending on your convention).
+        #
+        # NOTE: By the NMEA 2000 spec, the NAME is typically sent LSB first on the wire,
+        # but many people store it big-endian. Make sure you know how your code is actually sending it.
+        # Below is an example of reading it little-endian:
+        #
+        #   received_name = int.from_bytes(data[:8], 'little')
+        #
+        # or big-endian:
+        #
+        #   received_name = int.from_bytes(data[:8], 'big')
 
-        # Compare the remote name with your own
+        if len(data) >= 8:
+            # Suppose your code uses little-endian
+            received_name = int.from_bytes(data[:8], 'little')
+        else:
+            print("Warning: Address Claim data is too short!")
+            return
+
+                # Compare the remote name with your own
         if received_name < my_name:
             # Another device with higher priority (lower NAME) is claiming the same address
-            change_address()
-            send_iso_address_claim(current_address, my_name)
+            # You might pick a new address or do something else
+            print("Conflict: remote device has higher priority. Changing address.")
+            # change_address()
+            # claim_address(can_bus, current_address, my_name)
         elif received_name > my_name:
-            # Another device with lower priority claimed the address; we do nothing
-            pass
+            # We have higher priority; do nothing
+            print("Remote device has lower priority, we keep our address.")
+            
     elif pgn == PGN_COMMAND_GROUP:
         print("Received Command Group")
         # Handle command
