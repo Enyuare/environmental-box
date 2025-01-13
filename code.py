@@ -26,6 +26,43 @@ analog_pin2 = analogio.AnalogIn(board.A2)
 uart = busio.UART(board.TX, board.RX, baudrate=115200, receiver_buffer_size=2048)
 rvc = BNO08x_RVC(uart)
 
+# PGNs
+# RX 
+PGN_ADDRESS_CLAIM        = 0x060928  # 60928  in decimal
+PGN_COMMAND_GROUP        = 0x126208
+PGN_REQUEST              = 0x59904
+PGN_COMMANDED_ADDRESS    = 0x65240
+PGN_DATA_TRANSFER        = 0x60160
+PGN_TRANSPORT_PROTOCOL   = 0x60416
+# TX
+PGN_PRODUCT_INFO         = 0x126996
+PGN_CONFIG_INFO          = 0x126998
+PGN_ACKNOWLEDGMENT       = 0x59392
+PGN_TXRX_PGN_LIST        = 0x126464
+PGN_HEARTBEAT            = 0x126993
+
+# Example device identity & source address
+DEVICE_SOURCE_ADDRESS = 217  '
+
+# set up name for address claim
+unique_number = 0x1FFFFF       # Unique device number (21 bits)
+manufacturer_code = 0x1FF      # Manufacturer code (11 bits)
+device_instance_lower = 0x0    # Device instance lower (3 bits)
+device_instance_upper = 0x0    # Device instance upper (5 bits)
+device_function = 0x01         # Device function (8 bits)
+device_class = 0x1F            # Device class (7 bits)
+system_instance = 0x0          # System instance (4 bits)
+industry_group = 0x4           # Industry group (3 bits)
+arbitrary_address_capable = 0x1  # Arbitrary address capable (1 bit)
+
+name = construct_name(
+    unique_number, manufacturer_code, device_instance_lower,
+    device_instance_upper, device_function, device_class,
+    system_instance, industry_group, arbitrary_address_capable
+)
+can_bus = CAN(spi, cs, baudrate=250000, loopback=False , silent=False)
+
+
 # Create I2C bus as normal
 i2c = board.I2C()  # uses board.SCL and board.SDA
 # Create the TCA9548A object and give it the I2C bus
@@ -49,6 +86,53 @@ def read_voltage(pin):
       11+           Message Payload                           1..232 bytes of message payload
 
 """
+# Helper functions
+def send_message(pgn, data, priority=6):
+    """Send a CAN message with the given PGN and data."""
+    can_id = (priority << 26) | (pgn << 8) | DEVICE_SOURCE_ADDRESS
+    message = canio.Message(id=can_id, data=bytes(data), extended=True)
+    can.send(message)
+
+def receive_message():
+    """Receive and process CAN messages."""
+    if can.in_waiting > 0:
+        message = can.receive()
+        pgn = (message.id >> 8) & 0x1FFFF
+        process_message(pgn, message.data)
+
+def process_message(pgn, data):
+    """Process received messages based on PGN."""
+    if pgn == PGN_ADDRESS_CLAIM:
+        print("Received Address Claim")
+        # Here, you'd parse the 64-bit NAME from data
+        # Example (assuming the first 8 bytes is the NAME):
+        # received_name = int.from_bytes(data[:8], 'little')
+
+        # Compare the remote name with your own
+        if received_name < my_name:
+            # Another device with higher priority (lower NAME) is claiming the same address
+            change_address()
+            send_iso_address_claim(current_address, my_name)
+        elif received_name > my_name:
+            # Another device with lower priority claimed the address; we do nothing
+            pass
+    elif pgn == PGN_COMMAND_GROUP:
+        print("Received Command Group")
+        # Handle command
+    elif pgn == PGN_REQUEST:
+        print("Received Request")
+        # Handle request
+    elif pgn == PGN_COMMANDED_ADDRESS: 
+        print("Received Commanded Address")
+        # Handle commanded address
+    elif pgn == PGN_DATA_TRANSFER:
+        print("Received Data Transfer")
+        # Handle data transfer
+    elif pgn == PGN_TRANSPORT_PROTOCOL:
+        print("Received Transport Protocol")
+        # Handle transport protocol
+
+
 
 def send_temperature(can_bus, temperature_celsius, temp_instance, temp_source, Source_Address, Priority=5, PGN=130316):
     global TempSID
@@ -415,37 +499,23 @@ spi = board.SPI()
 #    spi, cs, loopback=True, silent=True
 #)  # use loopback to test without another device
 
-can_bus = CAN(
-    spi, cs, baudrate=250000, loopback=False , silent=False
-)  # use loopback to test with another device
+# can_bus = CAN(
+#     spi, cs, baudrate=250000, loopback=False , silent=False
+# )  # use loopback to test with another device
 
-# set up name for address claim
-unique_number = 0x1FFFFF       # Unique device number (21 bits)
-manufacturer_code = 0x1FF      # Manufacturer code (11 bits)
-device_instance_lower = 0x0    # Device instance lower (3 bits)
-device_instance_upper = 0x0    # Device instance upper (5 bits)
-device_function = 0x01         # Device function (8 bits)
-device_class = 0x1F            # Device class (7 bits)
-system_instance = 0x0          # System instance (4 bits)
-industry_group = 0x4           # Industry group (3 bits)
-arbitrary_address_capable = 0x1  # Arbitrary address capable (1 bit)
 
-name = construct_name(
-    unique_number, manufacturer_code, device_instance_lower,
-    device_instance_upper, device_function, device_class,
-    system_instance, industry_group, arbitrary_address_capable
-)
 # get source address
-source_address = 217  # Starting address
+source_address = DEVICE_SOURCE_ADDRESS  # Starting address
 while source_address <= 253:
     success = claim_address(can_bus, source_address, name)
     if success:
         print(f"Successfully claimed Source Address {source_address}")
         break
     else:
-        source_address += 1
+        DEVICE_SOURCE_ADDRESS += 1
 
-if source_address > 253:
+if DEVICE_SOURCE_ADDRESS > 253:
+    DEVICE_SOURCE_ADDRESS = 0
     print("Failed to claim any address on the network.")
     # Handle failure (e.g., reset or halt operation)
 
@@ -460,6 +530,12 @@ current_count = 0
 interval = 5  # Interval in seconds to calculate and print frequencies
 
 while True:
+    # Send periodic messages
+    send_message(PGN_PRODUCT_INFO, [0x02, 0x00, 0x00, 0x00])  # Example data
+    send_message(PGN_HEARTBEAT, [0xFF])  # Example heartbeat data
+    
+    # Receive and process messages
+    receive_message()
     # Initialize max tracking variables
     max_current, max_current1, max_current2 = 0, 0, 0
 
